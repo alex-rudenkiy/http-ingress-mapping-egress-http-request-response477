@@ -1,0 +1,7 @@
+site_name: 'HTTP request/response'
+
+nav:
+  - Описание : index.md
+
+plugins:
+  - techdocs-core

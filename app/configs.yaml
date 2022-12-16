@@ -1,0 +1,672 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    template: srvtest
+    app: ingressgateway-backstage
+    app.kubernetes.io/component: gateways
+    app.kubernetes.io/instance: istio-system
+    app.kubernetes.io/name: gateways
+    app.kubernetes.io/part-of: istio
+    chart: gateways
+    heritage: Tiller
+    istio: ingressgateway-backstage
+    release: istio
+  name: ingressgateway-backstage
+spec:
+  progressDeadlineSeconds: 1200
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: ingressgateway-backstage
+      istio: ingressgateway-backstage
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: 'false'
+      creationTimestamp: null
+      labels:
+        app: ingressgateway-backstage
+        chart: gateways
+        heritage: Tiller
+        istio: ingressgateway-backstage
+        release: istio
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - preference:
+                matchExpressions:
+                  - key: beta.kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+              weight: 2
+            - preference:
+                matchExpressions:
+                  - key: beta.kubernetes.io/arch
+                    operator: In
+                    values:
+                      - ppc64le
+              weight: 2
+            - preference:
+                matchExpressions:
+                  - key: beta.kubernetes.io/arch
+                    operator: In
+                    values:
+                      - s390x
+              weight: 2
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: beta.kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+                      - ppc64le
+                      - s390x
+      containers:
+        - args:
+            - proxy
+            - router
+            - '--domain'
+            - $(POD_NAMESPACE).svc.cluster.local
+            - '--proxyLogLevel=warning'
+            - '--proxyComponentLogLevel=misc:error'
+            - '--log_output_level=default:info'
+            - '--serviceCluster'
+            - ingressgateway-backstage.$(POD_NAMESPACE)
+            - '--trust-domain=cluster.local'
+          env:
+            - name: JWT_POLICY
+              value: first-party-jwt
+            - name: PILOT_CERT_PROVIDER
+              value: istiod
+            - name: CA_ADDR
+              value: 'istiod.istio-system.svc:15012'
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: INSTANCE_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.hostIP
+            - name: SERVICE_ACCOUNT
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.serviceAccountName
+            - name: CANONICAL_SERVICE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: 'metadata.labels[''service.istio.io/canonical-name'']'
+            - name: CANONICAL_REVISION
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: 'metadata.labels[''service.istio.io/canonical-revision'']'
+            - name: ISTIO_META_WORKLOAD_NAME
+              value: ingressgateway-backstage
+            - name: ISTIO_META_OWNER
+              value: >-
+                kubernetes://apis/apps/v1/namespaces/backstage/deployments/ingressgateway-backstage
+            - name: ISTIO_META_MESH_ID
+              value: cluster.local
+            - name: PROXY_CONFIG
+              value: >
+                {"discoveryAddress":"istiod.istio-system.svc:15012","tracing":{"zipkin":{"address":"jaeger-collector.istio-system.svc:9411"},"tlsSettings":{"subjectAltNames":[]}},"proxyMetadata":{"DNS_AGENT":""}}
+            - name: ISTIO_META_ROUTER_MODE
+              value: sni-dnat
+            - name: ISTIO_META_CLUSTER_ID
+              value: Kubernetes
+          image: 'swr.ru-moscow-1.hc.sbercloud.ru/sber/proxyv2:1.12.1.2'
+          imagePullPolicy: Always
+          name: istio-proxy
+          ports:
+            - containerPort: 15090
+              name: http-envoy-prom
+              protocol: TCP
+          readinessProbe:
+            failureThreshold: 30
+            httpGet:
+              path: /healthz/ready
+              port: 15021
+              scheme: HTTP
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: 600m
+              memory: 900Mi
+            requests:
+              cpu: 400m
+              memory: 700Mi
+          securityContext:
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /etc/istio/proxy
+              name: istio-envoy
+            - mountPath: /var/run/secrets/istio
+              name: istiod-ca-cert
+            - mountPath: /etc/istio/pod
+              name: podinfo
+            - name: ingressgateway-certs
+              mountPath: /etc/istio/ingressgateway-certs
+            - name: ingressgateway-ca-certs
+              mountPath: /etc/istio/ingressgateway-ca-certs
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      imagePullSecrets:
+        - name: default-secret
+      securityContext:
+        runAsUser: 999
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 60
+      volumes:
+        - emptyDir: {}
+          name: istio-envoy
+        - configMap:
+            defaultMode: 420
+            name: istio-ca-root-cert
+          name: istiod-ca-cert
+        - name: ingressgateway-certs
+          secret:
+            secretName: istio-ingressgateway-certs
+            defaultMode: 420
+            optional: true
+        - name: ingressgateway-ca-certs
+          secret:
+            secretName: istio-ingressgateway-ca-certs
+            defaultMode: 420
+            optional: true
+        - downwardAPI:
+            defaultMode: 256
+            items:
+              - fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels
+                path: labels
+              - fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.annotations
+                path: annotations
+          name: podinfo
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingressgateway-gw
+  labels:
+    template: srvtest
+spec:
+  selector:
+    istio: ingressgateway-backstage
+  servers:
+    - hosts:
+        - '*'
+      port:
+        name: http-8080
+        number: 8080
+        protocol: HTTP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    template: srvtest
+    app: ingressgateway-backstage
+    istio: ingressgateway-backstage
+  name: ingressgateway-svc
+  annotations:
+    kubernetes.io/elb.class: union
+    kubernetes.io/elb.subnet-id: 65529c62-e797-4e26-9282-86db36eb192e
+    kubernetes.io/elb.enterpriseID: a93d5bed-a526-47df-8bf1-5bd895bd1078
+    kubernetes.io/elb.autocreate: >-
+      {"type":"public","bandwidth_name":"cce-bandwidth-1669984443744","bandwidth_chargemode":"traffic","bandwidth_size":5,"bandwidth_sharetype":"PER","eip_type":"5_bgp"}
+    kubernetes.io/elb.lb-algorithm: ROUND_ROBIN
+    kubernetes.io/elb.health-check-flag: 'on'
+    kubernetes.io/elb.health-check-option: '{"protocol":"TCP","delay":"5","timeout":"10","max_retries":"3"}'
+spec:
+  ports:
+    - name: http-8080
+      targetPort: 8080
+      port: 8080
+      protocol: TCP
+  selector:
+    app: ingressgateway-backstage
+    istio: ingressgateway-backstage
+  type: LoadBalancer
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: srvtest
+  labels:
+    template: srvtest
+    app: srvtest
+spec:
+  selector:
+    matchLabels:
+      app: srvtest
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: srvtest
+      annotations:
+        sidecar.istio.io/inject: 'true'
+    spec:
+      volumes:
+        - name: app-config
+          configMap:
+            name: srvtest-cm
+            defaultMode: 420
+      containers:
+        - name: srvtest
+          image: >-
+            swr.ru-moscow-1.hc.sbercloud.ru/sber/ci90000193_synprod_dev/ci02564634_asgt-unimapper-dev:0.1.0.5
+          ports:
+            - containerPort: 8787
+              protocol: TCP
+          env:
+            - name: PROJECT_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+          envFrom:
+            - configMapRef:
+                name: srvtest-cm
+          volumeMounts:
+            - name: app-config
+              readOnly: true
+              mountPath: /schemas
+          resources:
+            limits:
+              cpu: 200m
+              memory: 200Mi
+            requests:
+              cpu: 150m
+              memory: 100Mi
+      imagePullSecrets:
+        - name: default-secret
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: srvtest-svc
+spec:
+  selector:
+    app: srvtest
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8787
+      targetPort: 8787
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: srvtest-cm
+  labels:
+    app: srvtest
+data:
+  TRANSFORM_RESPONSE: 'true'
+  LOG_LEVEL: debug
+  JSON_REQUEST: /schemas/json-request.json
+  JSON_RESPONSE: /schemas/json-response.json
+  json-request.json: >-
+    [{ "operation": "shift", "spec": { "x_request_id": "id", "source": "source",
+    "destination_service": "redirect_service", "email": "mail", "password":
+    "password", "date": "timestamp", "company": "organization" } }]
+  json-response.json: '[{ "operation": "shift", "spec": { "id": "id", "token": "token" } }]'
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: srvtest-ingress-vs
+spec:
+  exportTo:
+    - .
+  gateways:
+    - ingressgateway-gw
+  hosts:
+    - '*'
+  http:
+    - match:
+        - uri:
+            prefix: /Json
+      route:
+        - destination:
+            host: srvtest-svc
+            port:
+              number: 8787
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: srvtest-external-host
+spec:
+  exportTo:
+    - .
+  hosts:
+    - reqres.in
+  ports:
+    - name: http
+      number: 443
+      protocol: HTTP
+  resolution: DNS
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: srvtest-egress-vs
+spec:
+  exportTo:
+    - .
+  gateways:
+    - srvtest-egressgateway-gw
+    - mesh
+  hosts:
+    - reqres.in
+  http:
+    - match:
+        - gateways:
+            - mesh
+          port: 443
+      route:
+        - destination:
+            host: egressgateway-svc
+            port:
+              number: 8080
+    - match:
+        - gateways:
+            - srvtest-egressgateway-gw
+          port: 8080
+      route:
+        - destination:
+            host: reqres.in
+            port:
+              number: 443
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  labels:
+    template: srvtest
+  name: srvtest-egressgateway-gw
+spec:
+  selector:
+    istio: egressgateway-backstage
+  servers:
+    - hosts:
+        - reqres.in
+      port:
+        name: http-8080
+        number: 8080
+        protocol: HTTP
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: egressgateway-backstage
+  labels:
+    template: srvtest
+    app: egressgateway-backstage
+    app.kubernetes.io/part-of: istio
+    app.kubernetes.io/instance: istio-system
+    release: istio
+    app.kubernetes.io/version: 2.0.1-6.el8-75
+    app.kubernetes.io/component: gateways
+    istio: egressgateway-backstage
+    app.kubernetes.io/managed-by: maistra-istio-operator
+    app.kubernetes.io/name: gateways
+    chart: gateways
+    heritage: Tiller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: egressgateway-backstage
+      istio: egressgateway-backstage
+  template:
+    metadata:
+      namespace: backstage
+      creationTimestamp: null
+      labels:
+        app: egressgateway-backstage
+        chart: gateways
+        heritage: Tiller
+        istio: egressgateway-backstage
+        release: istio
+      annotations:
+        sidecar.istio.io/inject: 'false'
+    spec:
+      restartPolicy: Always
+      serviceAccountName: default
+      schedulerName: default-scheduler
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: beta.kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+                      - ppc64le
+                      - s390x
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 2
+              preference:
+                matchExpressions:
+                  - key: beta.kubernetes.io/arch
+                    operator: In
+                    values:
+                      - amd64
+            - weight: 2
+              preference:
+                matchExpressions:
+                  - key: beta.kubernetes.io/arch
+                    operator: In
+                    values:
+                      - ppc64le
+            - weight: 2
+              preference:
+                matchExpressions:
+                  - key: beta.kubernetes.io/arch
+                    operator: In
+                    values:
+                      - s390x
+      terminationGracePeriodSeconds: 60
+      securityContext: {}
+      containers:
+        - resources:
+            limits:
+              cpu: 600m
+              memory: 900Mi
+            requests:
+              cpu: 400m
+              memory: 700Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: 15021
+              scheme: HTTP
+            initialDelaySeconds: 1
+            timeoutSeconds: 5
+            periodSeconds: 2
+            successThreshold: 1
+            failureThreshold: 30
+          terminationMessagePath: /dev/termination-log
+          name: istio-proxy
+          env:
+            - name: JWT_POLICY
+              value: first-party-jwt
+            - name: PILOT_CERT_PROVIDER
+              value: istiod
+            - name: CA_ADDR
+              value: 'istiod.istio-system.svc:15012'
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: INSTANCE_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.hostIP
+            - name: SERVICE_ACCOUNT
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.serviceAccountName
+            - name: CANONICAL_SERVICE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: 'metadata.labels[''service.istio.io/canonical-name'']'
+            - name: CANONICAL_REVISION
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: 'metadata.labels[''service.istio.io/canonical-revision'']'
+            - name: ISTIO_META_WORKLOAD_NAME
+              value: egressgateway-backstage
+            - name: ISTIO_META_OWNER
+              value: >-
+                kubernetes://apis/apps/v1/namespaces/backstage/deployments/ingressgateway-backstage
+            - name: ISTIO_META_MESH_ID
+              value: cluster.local
+            - name: PROXY_CONFIG
+              value: >
+                {"discoveryAddress":"istiod.istio-system.svc:15012","tracing":{"zipkin":{"address":"jaeger-collector.istio-system.svc:9411"},"tlsSettings":{"subjectAltNames":[]}},"proxyMetadata":{"DNS_AGENT":""}}
+            - name: ISTIO_META_ROUTER_MODE
+              value: sni-dnat
+            - name: ISTIO_META_CLUSTER_ID
+              value: Kubernetes
+          ports:
+            - name: http-envoy-prom
+              containerPort: 15090
+              protocol: TCP
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: istio-envoy
+              mountPath: /etc/istio/proxy
+            - name: istiod-ca-cert
+              mountPath: /var/run/secrets/istio
+            - name: podinfo
+              mountPath: /etc/istio/pod
+            - name: egressgateway-certs
+              readOnly: true
+              mountPath: /etc/istio/egressgateway-certs
+            - name: egressgateway-ca-certs
+              readOnly: true
+              mountPath: /etc/istio/egressgateway-ca-certs
+          terminationMessagePolicy: File
+          image: 'swr.ru-moscow-1.hc.sbercloud.ru/sber/proxyv2:1.12.1.2'
+          args:
+            - proxy
+            - router
+            - '--domain'
+            - $(POD_NAMESPACE).svc.cluster.local
+            - '--proxyLogLevel=warning'
+            - '--proxyComponentLogLevel=misc:error'
+            - '--log_output_level=default:info'
+            - '--serviceCluster'
+            - egressgateway-backstage.$(POD_NAMESPACE)
+            - '--trust-domain=cluster.local'
+      serviceAccount: default
+      volumes:
+        - name: istio-envoy
+          emptyDir: {}
+        - name: istiod-ca-cert
+          configMap:
+            name: istio-ca-root-cert
+            defaultMode: 420
+        - name: egressgateway-certs
+          secret:
+            secretName: istio-egressgateway-certs
+            defaultMode: 420
+            optional: true
+        - name: egressgateway-ca-certs
+          secret:
+            secretName: istio-egressgateway-ca-certs
+            defaultMode: 420
+            optional: true
+        - name: podinfo
+          downwardAPI:
+            items:
+              - path: labels
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels
+              - path: annotations
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.annotations
+            defaultMode: 256
+      dnsPolicy: ClusterFirst
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    template: srvtest
+  name: egressgateway-svc
+spec:
+  ports:
+    - name: http-8080
+      port: 8080
+  selector:
+    app: egressgateway-backstage
+    istio: egressgateway-backstage
+---
